@@ -25,8 +25,6 @@ local REPO = "https://github.com/Seems-Good/BlisteringScalesAlert"
 local AUTHOR = "Jeremy-Gstein"
 local WEBSITE = "https://seemsgood.org"
 
-
-
 -- ── Shared helpers ────────────────────────────────────────────────────────
 local function MakeSectionHeader(parent, text, anchorY)
     local hdr = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
