@@ -1,5 +1,5 @@
 -- ============================================================
--- BlisteringScalesAlert.lua
+-- BlisteringScalesAlert.lua  (v0.2)
 -- Core logic. Exposes the BSA namespace for Settings.lua.
 -- ============================================================
 
@@ -8,6 +8,9 @@ BSA = BSA or {}   -- shared namespace; Settings.lua reads/writes this
 local ADDON_NAME                 = "BlisteringScalesAlert"
 local BLISTERING_SCALES_SPELL_ID = 360827
 local AUG_SPEC_ID                = 1473
+local VERSION = "@project-version@"
+local TIMESTAMP = "@project-date-iso@"
+
 
 -- Default saved-variable values used when BSADB is absent or missing a key
 local BSA_DEFAULTS = {
@@ -197,7 +200,17 @@ local function RebuildTankList()
             tostring(IsInGroup() and true or false)))
 end
 
-local function UnitHasBuffBySpellID(unit, spellID)
+-- In WoW 12.x, aura fields (spellId, isFromPlayerOrPlayerPet, etc.) returned by
+-- GetAuraDataBySlot are "secret" numbers/booleans when the aura was applied by
+-- another player — comparing them directly causes a taint Lua error.
+-- For auras the *local player* applied, those fields are readable normally.
+-- Strategy:
+--   • Iterate slots as before.
+--   • Wrap both the isFromPlayerOrPlayerPet and spellId checks in a single pcall.
+--     - Our own buff  → pcall succeeds, both checks pass → returns true.
+--     - Another player's buff → pcall catches the secret-value error → skip slot.
+-- This fixes the Lua error and ensures another Aug's Blistering Scales is ignored.
+local function PlayerHasBuffedUnit(unit, spellID)
     if not UnitExists(unit) then return false end
 
     local slots = { C_UnitAuras.GetAuraSlots(unit, "HELPFUL") }
@@ -207,24 +220,42 @@ local function UnitHasBuffBySpellID(unit, spellID)
         local slot = slots[i]
         if slot then
             local data = C_UnitAuras.GetAuraDataBySlot(unit, slot)
-            if data and data.spellId == spellID then
-                return true
+            if data then
+                local ok, matched = pcall(function()
+                    -- Both fields are secret for other players' auras; pcall
+                    -- catches any taint error so the loop continues safely.
+                    return data.isFromPlayerOrPlayerPet == true
+                       and data.spellId == spellID
+                end)
+                if ok and matched then
+                    return true
+                end
             end
         end
     end
     return false
 end
 
+-- Alias used by /bsa state and FindBuffOnTank
+local function UnitHasBuffBySpellID(unit)
+    return PlayerHasBuffedUnit(unit, BLISTERING_SCALES_SPELL_ID)
+end
+
 local function FindBuffOnTank()
     for unit in pairs(State.tankUnits) do
         if UnitExists(unit) and not UnitIsDead(unit) then
-            if UnitHasBuffBySpellID(unit, BLISTERING_SCALES_SPELL_ID) then
+            if PlayerHasBuffedUnit(unit, BLISTERING_SCALES_SPELL_ID) then
                 return true, unit
             end
         end
     end
     return false, nil
 end
+
+-- Forward declarations: UpdateSpec calls SetWatchedEvents, so both frame and
+-- SetWatchedEvents must be visible as locals before UpdateSpec is defined.
+local frame = CreateFrame("Frame", "BSAEventFrame", UIParent)
+local SetWatchedEvents   -- defined fully in the event-gating block below
 
 local function CheckAndUpdate(trigger)
     State.checkCount = State.checkCount + 1
@@ -266,6 +297,7 @@ local function UpdateSpec()
     local idx = GetSpecialization()
     if not idx then
         State.isAugEvoker = false
+        SetWatchedEvents()
         return
     end
     local specID = GetSpecializationInfo(idx)
@@ -273,6 +305,7 @@ local function UpdateSpec()
     State.isAugEvoker = (specID == AUG_SPEC_ID)
     if prev ~= State.isAugEvoker then
         LogEvent("SPEC_CHANGED", State.isAugEvoker and "Augmentation" or "other spec")
+        SetWatchedEvents()
     end
 end
 
@@ -280,8 +313,23 @@ local function IsTrackedTankUnit(unit)
     return unit and State.tankUnits[unit] == true
 end
 
+-- ── Dynamic event gating ──────────────────────────────────────────────────
+-- UNIT_AURA is the only high-frequency event. We only want it while we are
+-- an Augmentation Evoker AND out of combat. Anywhere else it is pure waste.
+-- PLAYER_TARGET_CHANGED / PLAYER_FOCUS_CHANGED have been removed entirely:
+-- they fired constantly in combat and were a no-op workaround that is no
+-- longer needed now that UNIT_AURA is filtered to tracked tank tokens only.
+SetWatchedEvents = function()
+    local wantAura = State.isAugEvoker and not State.inCombat
+    if wantAura then
+        frame:RegisterEvent("UNIT_AURA")
+    else
+        frame:UnregisterEvent("UNIT_AURA")
+    end
+    LogEvent("WATCH_EVENTS", wantAura and "UNIT_AURA=ON" or "UNIT_AURA=OFF")
+end
+
 -- ── Event handler ─────────────────────────────────────────────────────────
-local frame = CreateFrame("Frame", "BSAEventFrame", UIParent)
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -290,10 +338,8 @@ frame:RegisterEvent("PLAYER_REGEN_DISABLED")
 frame:RegisterEvent("PLAYER_REGEN_ENABLED")
 frame:RegisterEvent("GROUP_ROSTER_UPDATE")
 frame:RegisterEvent("ROLE_CHANGED_INFORM")
-frame:RegisterEvent("UNIT_AURA")
-frame:RegisterEvent("PLAYER_TARGET_CHANGED")
-frame:RegisterEvent("PLAYER_FOCUS_CHANGED")
 frame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+-- UNIT_AURA is registered/unregistered dynamically via SetWatchedEvents()
 
 frame:SetScript("OnEvent", function(_, event, arg1, arg2, ...)
     if event == "ADDON_LOADED" and arg1 == ADDON_NAME then
@@ -305,7 +351,7 @@ frame:SetScript("OnEvent", function(_, event, arg1, arg2, ...)
         BSA.InitDB()
         BSA.ApplySettings()
         State.inCombat = UnitAffectingCombat("player") and true or false
-        UpdateSpec()
+        UpdateSpec()          -- also calls SetWatchedEvents
         RebuildTankList()
         LogEvent("PLAYER_LOGIN",
             string.format("aug=%s combat=%s tanks=%d fontSize=%d color=%s",
@@ -318,23 +364,25 @@ frame:SetScript("OnEvent", function(_, event, arg1, arg2, ...)
 
     elseif event == "PLAYER_ENTERING_WORLD" then
         State.inCombat = UnitAffectingCombat("player") and true or false
-        UpdateSpec()
+        UpdateSpec()          -- also calls SetWatchedEvents
         RebuildTankList()
         LogEvent("ENTERING_WORLD")
         CheckAndUpdate("ENTERING_WORLD")
 
     elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
-        UpdateSpec()
+        UpdateSpec()          -- also calls SetWatchedEvents
         CheckAndUpdate("SPEC_CHANGED")
 
     elseif event == "PLAYER_REGEN_DISABLED" then
         State.inCombat = true
         LogEvent("COMBAT", "entered")
         HideAlert("combat started")
+        SetWatchedEvents()    -- unregisters UNIT_AURA for the duration of combat
 
     elseif event == "PLAYER_REGEN_ENABLED" then
         State.inCombat = false
         LogEvent("COMBAT", "left")
+        SetWatchedEvents()    -- re-registers UNIT_AURA now that we're out of combat
         CheckAndUpdate("LEFT_COMBAT")
 
     elseif event == "GROUP_ROSTER_UPDATE" or event == "ROLE_CHANGED_INFORM" then
@@ -343,19 +391,12 @@ frame:SetScript("OnEvent", function(_, event, arg1, arg2, ...)
         CheckAndUpdate(event)
 
     elseif event == "UNIT_AURA" then
+        -- Only reaches here when isAugEvoker=true and inCombat=false (SetWatchedEvents gate)
         local unit = arg1
         LogEvent("UNIT_AURA", tostring(unit))
         if IsTrackedTankUnit(unit) then
             CheckAndUpdate("UNIT_AURA:" .. tostring(unit))
         end
-
-    elseif event == "PLAYER_TARGET_CHANGED" then
-        LogEvent("TARGET_CHANGED", tostring(UnitName("target")))
-        CheckAndUpdate("TARGET_CHANGED")
-
-    elseif event == "PLAYER_FOCUS_CHANGED" then
-        LogEvent("FOCUS_CHANGED", tostring(UnitName("focus")))
-        CheckAndUpdate("FOCUS_CHANGED")
 
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
         local unit, _, spellID = arg1, arg2, ...
@@ -373,16 +414,16 @@ SlashCmdList["BLISTERINGSCALESALERT"] = function(msg)
 
     if cmd == "state" or cmd == "debug" then
         print("|cff00ccff[BSA] State dump:|r")
-        print(string.format("  isAugEvoker    = %s", tostring(State.isAugEvoker)))
-        print(string.format("  inCombat       = %s", tostring(State.inCombat)))
-        print(string.format("  alertVisible   = %s", tostring(State.alertVisible)))
-        print(string.format("  tankCount      = %d", State.tankCount))
+        print(string.format("  isAugEvoker = %s", tostring(State.isAugEvoker)))
+        print(string.format("  inCombat = %s", tostring(State.inCombat)))
+        print(string.format("  alertVisible = %s", tostring(State.alertVisible)))
+        print(string.format("  tankCount = %d", State.tankCount))
         print(string.format("  buffHolderUnit = %s", tostring(State.buffHolderUnit)))
-        print(string.format("  checkCount     = %d", State.checkCount))
+        print(string.format("  checkCount = %d", State.checkCount))
         if BSADB then
-            print(string.format("  fontSize       = %d", BSADB.fontSize or 0))
-            print(string.format("  colorKey       = %s", BSADB.colorKey or "?"))
-            print(string.format("  position       = %s/%s  x=%s  y=%s",
+            print(string.format("  fontSize = %d", BSADB.fontSize or 0))
+            print(string.format("  colorKey = %s", BSADB.colorKey or "?"))
+            print(string.format("  position = %s/%s  x=%s  y=%s",
                 tostring(BSADB.point), tostring(BSADB.relPoint),
                 tostring(BSADB.x), tostring(BSADB.y)))
         end
@@ -399,7 +440,7 @@ SlashCmdList["BLISTERINGSCALESALERT"] = function(msg)
         else
             for unit in pairs(State.tankUnits) do
                 local alive  = UnitExists(unit) and not UnitIsDead(unit)
-                local hasBuff = alive and UnitHasBuffBySpellID(unit, BLISTERING_SCALES_SPELL_ID)
+                local hasBuff = alive and UnitHasBuffBySpellID(unit)
                 print(string.format("    %-8s  %-22s  alive=%-5s  buff=%s",
                     unit,
                     UnitExists(unit) and (UnitName(unit) or "?") or "(gone)",
@@ -451,18 +492,26 @@ SlashCmdList["BLISTERINGSCALESALERT"] = function(msg)
         local name = C_Spell.GetSpellName(BLISTERING_SCALES_SPELL_ID)
         print(string.format("  C_Spell.GetSpellName → %s", tostring(name)))
 
+    elseif cmd == "help" or cmd == "commands" then
+        print("|cff00ccff[BSA]-".. VERSION .."|r Commands:")
+        print("  /bsa state    - full state + per-tank buff status")
+        print("  /bsa log      - rolling event log (last 40 events)")
+        print("  /bsa check    - force rescan + buff re-evaluate")
+        print("  /bsa tanks    - list detected tanks and their roles")
+        print("  /bsa show     - force alert visible (UI test)")
+        print("  /bsa hide     - hide alert")
+        print("  /bsa spellid  - verify spell ID → name lookup")
+        print("  /bsa settings - open the settings panel")
+    
     elseif cmd == "settings" or cmd == "options" or cmd == "config" then
         Settings.OpenToCategory("BlisteringScalesAlert")
 
+
     else
-        print("|cff00ccff[BSA]|r Commands:")
-        print("  /bsa state    — full state + per-tank buff status")
-        print("  /bsa log      — rolling event log (last 40 events)")
-        print("  /bsa check    — force tank rescan + buff re-evaluate")
-        print("  /bsa tanks    — list detected tanks and their roles")
-        print("  /bsa show     — force alert visible (UI positioning test)")
-        print("  /bsa hide     — hide alert")
-        print("  /bsa spellid  — verify spell ID → name lookup")
-        print("  /bsa settings — open the settings panel")
+        Settings.OpenToCategory("BlisteringScalesAlert")
+        print("|cff00ccff[BSA]-" .. VERSION .. "|r Commands:")
+        print("  /bsa help     - list all available commands")
+        print("  /bsa show     - force alert visible (UI test)")
+        print("  /bsa hide     - hide alert")
     end
 end

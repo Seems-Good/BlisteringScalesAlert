@@ -17,6 +17,15 @@ local BTN_H        = 28    -- standard button height
 local COLOR_BTN_W  = 130   -- color-swatch button width
 local COLOR_BTN_H  = 28
 
+-- ── Metadata constants ────────────────────────────────────────────────────
+local VERSION = "@project-version@"
+local TIMESTAMP = "@project-date-iso@"
+local REPO = "https://github.com/Seems-Good/BlisteringScalesAlert"
+local AUTHOR = "Jeremy-Gstein"
+local WEBSITE = "https://seemsgood.org"
+
+
+
 -- ── Shared helpers ────────────────────────────────────────────────────────
 local function MakeSectionHeader(parent, text, anchorY)
     local hdr = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
@@ -46,7 +55,7 @@ local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 title:SetPoint("TOPLEFT", panel, "TOPLEFT", PAD_L, -16)
 title:SetTextColor(1, 0.82, 0, 1)
 title:SetFont(title:GetFont(), 16, "OUTLINE")
-title:SetText("Blistering Scales Alert  |cff888888v0.2|r")
+title:SetText("Blistering Scales Alert  |cff888888".. VERSION .."|r")
 
 MakeDivider(panel, -38)
 
@@ -130,15 +139,15 @@ resetBtn:SetScript("OnClick", function()
     print("|cff00ccff[BSA]|r Position reset to default (top-centre).")
 end)
 
-MakeDivider(panel, -126)
+MakeDivider(panel, -145)
 
 -- ═══════════════════════════════════════════════════════════════
 --  SECTION 2 — FONT SIZE
 -- ═══════════════════════════════════════════════════════════════
-MakeSectionHeader(panel, "Font Size", -140)
+MakeSectionHeader(panel, "Font Size", -150)
 
 local sizeSlider = CreateFrame("Slider", "BSASizeSlider", panel, "OptionsSliderTemplate")
-sizeSlider:SetPoint("TOPLEFT", panel, "TOPLEFT", PAD_L + 8, -168)
+sizeSlider:SetPoint("TOPLEFT", panel, "TOPLEFT", PAD_L + 8, -172)
 sizeSlider:SetWidth(320)
 sizeSlider:SetMinMaxValues(18, 48)
 sizeSlider:SetValueStep(1)
@@ -171,12 +180,12 @@ sizeSlider:SetScript("OnValueChanged", function(self, value)
     end
 end)
 
-MakeDivider(panel, -210)
+MakeDivider(panel, -219)
 
 -- ═══════════════════════════════════════════════════════════════
 --  SECTION 3 — TEXT COLOR
 -- ═══════════════════════════════════════════════════════════════
-MakeSectionHeader(panel, "Text Color", -224)
+MakeSectionHeader(panel, "Text Color", -233)
 
 -- Color definitions ordered as: Red, Orange, Yellow / White, Cyan, Green
 local COLOR_ORDER = {
@@ -199,7 +208,7 @@ for i, def in ipairs(COLOR_ORDER) do
     btn:SetPoint(
         "TOPLEFT", panel, "TOPLEFT",
         PAD_L + col * (COLOR_BTN_W + COL_GAP),
-        -252 - row * (COLOR_BTN_H + 8)
+        -261 - row * (COLOR_BTN_H + 8)
     )
     btn:SetText(def.label)
     -- Tint the button label text with the colour itself
@@ -231,6 +240,28 @@ panel:SetScript("OnShow", function()
         btn:SetAlpha(key == BSADB.colorKey and 1.0 or 0.55)
     end
 end)
+
+-- ═══════════════════════════════════════════════════════════════
+--  FOOTER — About / Links
+-- ═══════════════════════════════════════════════════════════════
+MakeDivider(panel, -335)
+
+local FOOTER_Y = -349
+
+local authorLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+authorLabel:SetPoint("TOPLEFT", panel, "TOPLEFT", PAD_L, FOOTER_Y)
+authorLabel:SetTextColor(0.7, 0.7, 0.7, 1)
+authorLabel:SetText("Author:  |cffffd700" .. AUTHOR .. "|r    Website:  |cffffd700" .. WEBSITE .. "|r")
+
+local versionLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+versionLabel:SetPoint("TOPLEFT", panel, "TOPLEFT", PAD_L, FOOTER_Y - 22)
+versionLabel:SetTextColor(0.7, 0.7, 0.7, 1)
+versionLabel:SetText("Version:  |cffffd700" .. VERSION .. "|r    Built:  |cffffd700" .. TIMESTAMP .. "|r")
+
+local repoLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+repoLabel:SetPoint("TOPLEFT", panel, "TOPLEFT", PAD_L, FOOTER_Y - 44)
+repoLabel:SetTextColor(0.7, 0.7, 0.7, 1)
+repoLabel:SetText("Bugs & feature requests:  |cffffd700" .. REPO .. "/issues|r")
 
 -- ── Register with WoW's Settings system (12.x) ───────────────────────────
 local category = Settings.RegisterCanvasLayoutCategory(panel, "BlisteringScalesAlert")

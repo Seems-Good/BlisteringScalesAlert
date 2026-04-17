@@ -1,7 +1,7 @@
 ## Interface: 120000, 120001, 120005
 ## Version: @project-version@
 ## Title: BlisteringScalesAlert
-## Note: BSA! Simple (out of combat) BlisteringScales Reminder Addon
+## Note: BSA!<BlisteringScalesAlert> ~ Simple out of combat Reminder for Blistering Scales
 ## Author: Jeremy-Gstein
 ## SavedVariables: BSADB
 
