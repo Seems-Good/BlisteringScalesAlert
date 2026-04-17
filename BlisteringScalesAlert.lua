@@ -16,6 +16,7 @@ local COLOR_YELLOW = "|cffffff00"
 local COLOR_GRAY   = "|cff808080"
 local COLOR_BLUE   = "|cff00ccff"
 local FORMAT_NAME  = COLOR_BLUE .. "BlisteringScalesAlert[ BSA ]|r" .. COLOR_GRAY .. "-(" .. VERSION .. ")|r"
+local FORMAT_SLUG  = COLOR_BLUE .. "[BSA]|r" .. COLOR_GRAY .. "-(" .. VERSION .. ")|r"
 
 -- Default saved-variable values used when BSADB is absent or missing a key
 local BSA_DEFAULTS = {
@@ -353,7 +354,7 @@ frame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 
 frame:SetScript("OnEvent", function(_, event, arg1, arg2, ...)
     if event == "ADDON_LOADED" and arg1 == ADDON_NAME then
-        print("|cff00ccff[BSA]|r Blistering Scales Alert loaded. Type |cffffd700/bsa|r for commands.")
+        print(FORMAT_SLUG .. " Type |cffffd700/bsa help|r for commands.")
         LogEvent("ADDON_LOADED")
 
     elseif event == "PLAYER_LOGIN" then
